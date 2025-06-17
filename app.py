@@ -9,37 +9,40 @@ from pdf_extractor import (
     get_file_info
 )
 from feedback_generator import generate_feedback
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-# 🔍 제목 추출 - 제안서에서 명확한 제목 추출
+# 🔍 제안서 제목 추출
 def extract_document_title(text: str) -> str:
-    # 상단 1~2페이지에서 제목으로 추정되는 라인 추출
     candidates = text.split("\n")
     candidates = [line.strip() for line in candidates if len(line.strip()) > 5 and len(line.strip()) < 60]
-    # '제안서', '계획', '방안'이 들어간 라인 우선 탐색
     for line in candidates:
         if any(keyword in line for keyword in ["제안서", "계획", "방안", "구축", "시스템"]):
             return line
     return candidates[0] if candidates else "제안 제목 미상"
 
-# 📘 제안요청서에서 일치하는 문단 추출
-def find_matching_section(rfp_text: str, title: str) -> str:
-    lines = rfp_text.split("\n")
-    matches = []
-    found = False
-    for i, line in enumerate(lines):
-        if title[:8] in line or title[:6] in line:  # 앞부분 유사도 매칭
-            found = True
-        if found:
-            matches.append(line)
-            # 공백 줄 또는 다음 큰 제목 만나면 종료
-            if len(line.strip()) == 0 or re.match(r'^\d+\.', line.strip()):
-                break
-    return "\n".join(matches[:30]) if matches else "[❗ 관련 항목을 찾을 수 없습니다.]"
+# 📘 제안요청서에서 가장 유사한 문단만 추출
+def get_best_matching_section(rfp_text: str, title: str) -> str:
+    paragraphs = [p.strip() for p in rfp_text.split("\n\n") if len(p.strip()) > 30]
+    if not paragraphs:
+        return "[❗ 유효한 문단이 없습니다.]"
+
+    vectorizer = TfidfVectorizer().fit(paragraphs + [title])
+    para_vectors = vectorizer.transform(paragraphs)
+    title_vector = vectorizer.transform([title])
+
+    scores = cosine_similarity(title_vector, para_vectors)[0]
+    top_idx = scores.argmax()
+    top_score = scores[top_idx]
+
+    if top_score < 0.1:
+        return "[❗ 관련 항목을 찾을 수 없습니다.]"
+
+    return paragraphs[top_idx]
 
 # 📄 앱 구성
-st.set_page_config(page_title="제안서 피드백 시스템 (제목 기반)", layout="wide")
-st.title("🧠 제안서 제목 기반 비교 시스템")
-st.markdown("제안서의 제목을 자동 추출하고, 이에 해당하는 제안요청서의 항목과 비교합니다.")
+st.set_page_config(page_title="제안서 피드백 시스템 (고도화)", layout="wide")
+st.title("🧠 제안서 제목 기반 항목 비교 시스템 (유사도 정밀 추출 버전)")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -76,8 +79,8 @@ if rfp_file and proposal_file:
     proposal_title = extract_document_title(proposal_text)
     st.write(f"📌 추출된 제안서 제목: **{proposal_title}**")
 
-    st.subheader("📌 제목 기반 제안요청서 항목")
-    matched_section = find_matching_section(rfp_text, proposal_title)
+    st.subheader("🎯 유사도 기반 제안요청서 항목 자동 추출")
+    matched_section = get_best_matching_section(rfp_text, proposal_title)
     st.code(matched_section)
 
     st.subheader("📐 항목 비교 결과")
