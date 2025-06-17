@@ -76,7 +76,7 @@ def generate_feedback(prompt: str, debug: bool = False) -> str:
         start_time = time.time()
 
         response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model="llama3-8b-8192",  # 또는 llama3-70b-8192
             messages=messages,
             temperature=0.65,
             max_tokens=2000,
