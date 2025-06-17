@@ -1,9 +1,9 @@
-
-import streamlit as st
+ㄹimport streamlit as st
 import requests
 
 st.set_page_config(page_title="제안서 피드백 생성기", layout="centered")
 
+# Groq API 키 (Streamlit Secrets에서 불러옴)
 api_key = st.secrets["groq_api_key"]
 
 def ask_groq(prompt):
@@ -21,6 +21,7 @@ def ask_groq(prompt):
     result = response.json()
     return result['choices'][0]['message']['content']
 
+# Streamlit UI
 st.title("📄 제안서 피드백 생성기")
 st.markdown("Streamlit + Groq API를 사용한 제안서 비교 피드백 자동 생성기입니다.")
 
@@ -35,9 +36,10 @@ if st.button("피드백 문장 생성"):
         st.warning("입력 내용을 작성해주세요.")
     else:
         with st.spinner("Groq에게 요청 중..."):
-            prompt = f"다음 내용을 바탕으로 제안서 피드백 문장을 전문가처럼 자연스럽게 작성해줘:
+            prompt = f"""다음 내용을 바탕으로 제안서 피드백 문장을 전문가처럼 자연스럽게 작성해줘:
 
-{user_input}"
+{user_input}
+"""
             output = ask_groq(prompt)
         st.success("완료!")
         st.markdown("### ✍️ 생성된 피드백 문장:")
