@@ -22,9 +22,7 @@ if uploaded:
                     with st.spinner("Groq AI로 예시 생성 중..."):
                         try:
                             example = analyze_section_with_groq(heading, i)
-                            st.markdown(f"✅ **작성 가이드 예시:**
-
-{example}")
+                            st.markdown(f"✅ **작성 가이드 예시:**\n\n{example}")
                         except Exception as e:
                             st.error(f"❌ 예시 생성 실패: {e}")
 else:
