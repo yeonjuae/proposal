@@ -1,101 +1,111 @@
-
-import os
-import re
 import streamlit as st
-import fitz  # PyMuPDF
+import re
+from comparator import compare_documents_v2
+from pdf_extractor import (
+    extract_text_from_pdf,
+    extract_text_by_page,
+    summarize_pdf_statistics,
+    get_file_info
+)
+from feedback_generator import generate_feedback
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from groq_helper_direct_key import analyze_section_with_groq  # ✅ 추가
 
-# ==============================
-# 🔧 Helper 함수들 직접 포함
-# ==============================
+# 🔍 제안서 제목 추출
+def extract_document_title(text: str) -> str:
+    candidates = text.split("\n")
+    candidates = [line.strip() for line in candidates if len(line.strip()) > 5 and len(line.strip()) < 60]
+    for line in candidates:
+        if any(keyword in line for keyword in ["제안서", "계획", "방안", "구축", "시스템"]):
+            return line
+    return candidates[0] if candidates else "제안 제목 미상"
 
-def get_proposal_title_from_filename(filename):
-    return filename.replace(".pdf", "").strip()
+# 📘 제안요청서에서 가장 유사한 문단만 추출
+def get_best_matching_section(rfp_text: str, title: str) -> str:
+    paragraphs = [p.strip() for p in rfp_text.split("\n\n") if len(p.strip()) > 30]
+    if not paragraphs:
+        return "[❗ 유효한 문단이 없습니다.]"
 
-# 항목 추출 (정밀도 개선)
-def extract_sections_from_text(text):
-    lines = text.splitlines()
-    sections = set()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # 조건: 숫자+괄호/점, 장 제목, 한글 포함, 길이 5자 이상
-        if re.match(r"^(제?\d+장|\d+[\.\)]\s*|[ⅠⅡⅢ])", line) and len(line) >= 5 and re.search(r"[가-힣]", line):
-            sections.add(line)
-    return list(sections)
+    vectorizer = TfidfVectorizer().fit(paragraphs + [title])
+    para_vectors = vectorizer.transform(paragraphs)
+    title_vector = vectorizer.transform([title])
 
-# 예시 추천 (부분 매칭 허용)
-def get_examples_for_section(section_title):
-    section_title = section_title.lower()
-    mapping = {
-        "기능": [
-            "본 시스템은 실시간 교통 데이터를 수집 및 분석하여, 도심 내 혼잡 구간을 사전 예측합니다.",
-            "주요 기능으로는 교통량 예측, 사고 감지, 통합 관제 기능이 포함됩니다."
-        ],
-        "추진": [
-            "3단계 추진 전략으로 초기 분석 → 시스템 설계 → 현장 적용의 구조로 수행됩니다.",
-            "추진일정은 약 6개월 간격으로 세부단계를 설정하고, PM 주관 하에 분기별 점검이 이뤄집니다."
-        ],
-        "효과": [
-            "교통 체증 완화와 함께, 시민의 이동 편의성이 증대됩니다.",
-            "사업을 통해 연간 약 5억 원의 비용 절감 효과가 기대됩니다."
-        ],
-        "사업관리": [
-            "사업관리는 주관기관과 협력업체 간의 정기 회의 및 성과 점검으로 운영됩니다.",
-            "리스크 관리를 위한 백업 계획과 이슈 대응 프로세스를 반드시 포함해야 합니다."
-        ]
-    }
-    for key, value in mapping.items():
-        if key in section_title:
-            return value
-    return ["해당 항목에 대한 예시가 준비되지 않았습니다."]
+    scores = cosine_similarity(title_vector, para_vectors)[0]
+    top_idx = scores.argmax()
+    top_score = scores[top_idx]
 
-# 시각화 구성
-def visualize_feedback(section, status, examples):
-    color_map = {
-        "포함됨": "✅",
-        "부분 포함": "⚠️",
-        "누락됨": "❌"
-    }
-    st.markdown(f"**검출 상태:** {color_map.get(status, '❓')} `{status}`")
-    st.markdown("**✒️ 작성 예시:**")
-    for ex in examples:
-        st.markdown(f"- {ex}")
+    if top_score < 0.1:
+        return "[❗ 관련 항목을 찾을 수 없습니다.]"
 
-# ==============================
-# 📄 PDF 텍스트 추출 함수
-# ==============================
+    return paragraphs[top_idx]
 
-def extract_text_from_pdf(uploaded_file):
-    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-        text = ""
-        for page in doc:
-            text += page.get_text()
-    return text
+# 📄 앱 구성
+st.set_page_config(page_title="제안서 피드백 시스템 (고도화)", layout="wide")
+st.title("🧠 제안서 제목 기반 항목 비교 시스템 (유사도 정밀 추출 버전)")
 
-# ==============================
-# 🎯 Streamlit 메인 앱
-# ==============================
+col1, col2 = st.columns(2)
+with col1:
+    rfp_file = st.file_uploader("📥 제안요청서 PDF 업로드", type="pdf", key="rfp")
+with col2:
+    proposal_file = st.file_uploader("📥 제안서 PDF 업로드", type="pdf", key="proposal")
 
-st.set_page_config(page_title="AI 제안서 작성 도우미", layout="wide")
-st.title("📑 제안요청서 기반 AI 피드백 도우미")
+if rfp_file and proposal_file:
+    st.subheader("📄 문서 정보")
+    col1, col2 = st.columns(2)
+    col1.json(get_file_info(rfp_file))
+    col2.json(get_file_info(proposal_file))
 
-uploaded_rfp = st.file_uploader("📌 제안요청서(PDF)를 업로드하세요", type=["pdf"])
+    with st.spinner("📖 텍스트 추출 중..."):
+        rfp_file.seek(0)
+        rfp_text = extract_text_from_pdf(rfp_file)
 
-if uploaded_rfp:
-    rfp_text = extract_text_from_pdf(uploaded_rfp)
-    rfp_title = get_proposal_title_from_filename(uploaded_rfp.name)
-    st.subheader(f"📝 제안요청서 제목: {rfp_title}")
+        proposal_file.seek(0)
+        proposal_text = extract_text_from_pdf(proposal_file)
 
-    st.markdown("---")
-    st.markdown("## 📂 자동 추출된 주요 항목")
-    rfp_sections = extract_sections_from_text(rfp_text)
+        rfp_file.seek(0)
+        rfp_page_data = extract_text_by_page(rfp_file.read())
+        proposal_file.seek(0)
+        proposal_page_data = extract_text_by_page(proposal_file.read())
 
-    if not rfp_sections:
-        st.warning("❌ 항목을 찾을 수 없습니다.")
-    else:
-        for section in rfp_sections:
-            with st.expander(f"🔹 {section}"):
-                status = "부분 포함" if len(section) >= 8 else "누락됨"
-                examples = get_examples_for_section(section)
-                visualize_feedback(section, status, examples)
+    st.subheader("📊 문서 통계")
+    tab1, tab2 = st.tabs(["제안요청서", "제안서"])
+    with tab1:
+        st.json(summarize_pdf_statistics(rfp_page_data))
+    with tab2:
+        st.json(summarize_pdf_statistics(proposal_page_data))
+
+    st.subheader("📝 제안서 제목 자동 추출")
+    proposal_title = extract_document_title(proposal_text)
+    st.write(f"📌 추출된 제안서 제목: **{proposal_title}**")
+
+    st.subheader("🎯 유사도 기반 제안요청서 항목 자동 추출")
+    matched_section = get_best_matching_section(rfp_text, proposal_title)
+    st.code(matched_section)
+
+    st.subheader("📐 항목 비교 결과")
+    comparison_result = compare_documents_v2(matched_section, proposal_text)
+    for index, item in enumerate(comparison_result):
+        st.markdown(f"### 🔹 {item['항목']}")
+        st.write(f"- 포함 여부: `{item['포함여부']}`")
+        st.write(f"- 키워드 수: `{item['키워드수']}`")
+        st.write(f"- 매칭률: `{round(item['매칭률'] * 100, 1)}%`")
+
+        # ✅ 작성 예시 자동 생성
+        if item["포함여부"] == "누락됨":
+            with st.expander("✍️ 작성 예시 (Groq 생성)", expanded=False):
+                with st.spinner("Groq가 작성 중입니다..."):
+                    example = analyze_section_with_groq(item["항목"], index)
+                    st.markdown(example)
+
+    if st.button("🧾 피드백 생성"):
+        with st.spinner("피드백 작성 중..."):
+            prompt_text = ""
+            for item in comparison_result:
+                prompt_text += f"[{item['항목']}] → {item['포함여부']}\n"
+            feedback = generate_feedback(prompt_text)
+        st.subheader("🧠 생성된 피드백")
+        st.write(feedback)
+
+else:
+    st.info("양쪽 문서를 모두 업로드해 주세요.")
