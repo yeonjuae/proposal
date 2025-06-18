@@ -10,7 +10,7 @@ from pdf_extractor import (
 from feedback_generator import generate_feedback
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from groq_helper_direct_key import analyze_section_with_groq  # ✅ 추가
+from groq_helper_direct_key import analyze_section_with_groq  # ✅ Groq 연동만 추가
 
 # 🔍 제안서 제목 추출
 def extract_document_title(text: str) -> str:
@@ -91,9 +91,9 @@ if rfp_file and proposal_file:
         st.write(f"- 키워드 수: `{item['키워드수']}`")
         st.write(f"- 매칭률: `{round(item['매칭률'] * 100, 1)}%`")
 
-        # ✅ 작성 예시 자동 생성
+        # ✅ Groq 예시 자동 생성 (기존 구조 보존)
         if item["포함여부"] == "누락됨":
-            with st.expander("✍️ 작성 예시 (Groq 생성)", expanded=False):
+            with st.expander("✍️ 작성 예시 (Groq 자동 생성)", expanded=False):
                 with st.spinner("Groq가 작성 중입니다..."):
                     example = analyze_section_with_groq(item["항목"], index)
                     st.markdown(example)
