@@ -2,3 +2,7 @@ streamlit
 PyMuPDF
 groq
 scikit-learn
+python-docx
+tqdm
+pandas
+loguru
