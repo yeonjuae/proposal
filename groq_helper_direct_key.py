@@ -1,9 +1,10 @@
 from groq import Groq
 
-# ⚠️ 여기에 직접 Groq 키를 입력하세요 (절대 GitHub에 올리지 마세요!)
-client = Groq(api_key="sk-여기에당신의진짜키")
+# ⚠️ 여기에 직접 Groq 키를 입력하세요 (Streamlit에서는 secrets 사용 권장)
+client = Groq(api_key="")
 
 def analyze_section_with_groq(section_text, index):
+    section_text = section_text.encode("utf-8", "ignore").decode("utf-8")  # ✅ 한글 인코딩 문제 해결
     prompt = f"""
     [제안요청 항목 {index+1}]
     {section_text}
