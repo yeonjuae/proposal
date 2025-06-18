@@ -1,4 +1,3 @@
-
 import streamlit as st
 import re
 from comparator import compare_documents_v2
@@ -102,3 +101,21 @@ if rfp_file and proposal_file:
 
 else:
     st.info("양쪽 문서를 모두 업로드해 주세요.")
+
+# 추가 기능 1: 항목별 작성 가이드 및 예시 표시
+def get_writing_guide(title):
+    # 키워드 기반 예시 텍스트 추천
+    if "기능" in title:
+        return "이 항목에는 시스템 구성도, 흐름도, 주요 기능을 도표로 설명하는 것이 좋습니다.\n예시: '본 시스템은 실시간 교통정보 수집, 분석, 시각화를 포함한 3대 기능을 중심으로 구성됩니다.'"
+    elif "전략" in title or "방향" in title:
+        return "이 항목에는 사업의 추진 전략, 단계별 로드맵, 기대 효과를 포함하세요.\n예시: '단계별 전략은 인프라 고도화 → 데이터 통합 → 지능형 서비스로 이어집니다.'"
+    elif "효과" in title or "기대" in title:
+        return "정량적 기대성과(예: 처리시간 단축 %, 예산 절감액)와 정성적 효과(정책 반영, 대시민 서비스 향상)를 서술하면 좋습니다."
+    else:
+        return "작성 시 항목의 요구사항에 따라 도식, 표, 사례 등을 활용해 구체적으로 작성하는 것이 좋습니다."
+
+# 기존 비교 루프 내에서 작성 가이드 및 예시를 추가로 출력
+# → 기존 app.py 코드 중 for idx, (section_title, section_body) in enumerate(rfp_sections.items(), start=1): 아래에 삽입 필요
+
+                with st.expander("✍ 작성 가이드 및 예시", expanded=False):
+                    st.markdown(get_writing_guide(section_title))
