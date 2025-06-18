@@ -1,40 +1,40 @@
 import streamlit as st
 from groq import Groq
+import os
 
-st.set_page_config(page_title="Groq 대화 인터페이스", layout="wide")
-st.title("💬 Groq와 대화하기")
+# GROQ API 키 불러오기
+api_key = st.secrets["GROQ_API_KEY"]
+client = Groq(api_key=api_key)
 
-# 키는 환경변수나 secrets.toml에 저장되었어야 함
-client = Groq(api_key=st.secrets.get("GROQ_API_KEY", ""))
+st.set_page_config(page_title="Groq 챗봇", layout="centered")
+st.title("🤖 Groq 기반 제안서 챗봇")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-# 이전 메시지 출력
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# 입력창
+user_input = st.text_input("무엇이든 물어보세요:", key="input")
 
-# 사용자 입력
-if prompt := st.chat_input("Groq에게 물어보세요."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+# 대화 표시
+for role, msg in st.session_state.chat_history:
+    if role == "user":
+        st.markdown(f"**🙋‍♀️ 나:** {msg}")
+    else:
+        st.markdown(f"**🤖 Groq:** {msg}")
 
-    with st.spinner("Groq가 생각 중..."):
-        try:
-            response = client.chat.completions.create(
-                model="mixtral-8x7b-32768",
-                messages=[
-                    {"role": "system", "content": "당신은 제안서, 공공문서, 사업계획서를 도와주는 전문 AI입니다."},
-                    *st.session_state.messages
-                ],
-                temperature=0.6,
-            )
-            reply = response.choices[0].message.content.strip()
-            st.session_state.messages.append({"role": "assistant", "content": reply})
+# 대화 로직
+if user_input:
+    st.session_state.chat_history.append(("user", user_input))
 
-            with st.chat_message("assistant"):
-                st.markdown(reply)
-        except Exception as e:
-            st.error(f"❌ 오류 발생: {e}")
+    with st.spinner("Groq가 답변 중..."):
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[
+                {"role": "system", "content": "당신은 공공 제안서를 잘 작성하는 전문가입니다."},
+                {"role": "user", "content": user_input}
+            ],
+            temperature=0.4
+        )
+        answer = response.choices[0].message.content.strip()
+        st.session_state.chat_history.append(("assistant", answer))
+        st.rerun()
