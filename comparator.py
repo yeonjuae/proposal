@@ -1,97 +1,113 @@
+
 import re
 import json
-from typing import List, Dict, Tuple
-from collections import Counter
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from typing import List, Dict
+from datetime import datetime
 
-def extract_keywords(text: str) -> List[str]:
-    stopwords = set([
-        "및", "등", "이", "그", "저", "를", "으로", "에", "의", "은", "는", "가", "하", "고", "도", "다",
-        "수", "들", "것", "때", "있", "되", "없", "등", "각", "통해", "대한", "위한"
-    ])
-    words = re.findall(r'\b[\w가-힣]+\b', text.lower())
-    return [word for word in words if word not in stopwords and len(word) > 1]
+# ====================================================
+# 📊 comparator.py (확장형)
+# - 제안요청서 항목별 포함 여부 판단 모듈
+# - 포함됨 / 부분 포함 / 누락됨 판단 + 키워드 매칭률 계산 + 로깅 포함
+# ====================================================
 
-def keyword_match_score(section_text: str, proposal_text: str) -> float:
-    section_keywords = extract_keywords(section_text)
-    proposal_keywords = extract_keywords(proposal_text)
-    if not section_keywords:
+# ----------------------------------------------------
+# 🔧 설정: 불용어
+# ----------------------------------------------------
+DEFAULT_STOPWORDS = {"및", "등", "관련", "사항", "기술", "설명", "필요", "제시", "내용", "수립", "요구"}
+
+# ----------------------------------------------------
+# 🧼 텍스트 전처리
+# ----------------------------------------------------
+def normalize(text: str) -> str:
+    return text.lower().strip().replace("“", "").replace("”", "").replace("‘", "").replace("’", "")
+
+# ----------------------------------------------------
+# 🔍 핵심 키워드 추출 함수
+# ----------------------------------------------------
+def extract_keywords(text: str, stopwords: set = DEFAULT_STOPWORDS) -> List[str]:
+    text = normalize(text)
+    words = re.findall(r"[가-힣a-zA-Z0-9]{2,}", text)
+    return [word for word in words if word not in stopwords]
+
+# ----------------------------------------------------
+# 📐 키워드 매칭률 계산 함수
+# ----------------------------------------------------
+def keyword_match_score(keywords: List[str], proposal_text: str) -> float:
+    if not keywords:
         return 0.0
-    match_count = sum((Counter(proposal_keywords) & Counter(section_keywords)).values())
-    return match_count / len(section_keywords)
+    matches = sum(1 for word in keywords if word in proposal_text.lower())
+    return round(matches / len(keywords), 2)
 
-def determine_status(score: float, thresholds=(0.75, 0.4)) -> str:
-    if score >= thresholds[0]:
+# ----------------------------------------------------
+# 📊 항목 상태 판단
+# ----------------------------------------------------
+def determine_status(score: float, threshold_full: float = 0.9, threshold_partial: float = 0.4) -> str:
+    if score >= threshold_full:
         return "포함됨"
-    elif score >= thresholds[1]:
+    elif score >= threshold_partial:
         return "부분 포함"
     else:
         return "누락됨"
 
-def check_item(rfp_section: Tuple[str, str], proposal_text: str) -> Dict:
-    title, content = rfp_section
-    score = keyword_match_score(content, proposal_text)
+# ----------------------------------------------------
+# 🧠 항목별 비교 실행
+# ----------------------------------------------------
+def check_item(request_item: str, proposal_text: str) -> Dict:
+    keywords = extract_keywords(request_item)
+    score = keyword_match_score(keywords, proposal_text)
     status = determine_status(score)
     return {
-        "항목명": title,
-        "매칭 점수": round(score, 2),
+        "항목": request_item.strip(),
+        "키워드수": len(keywords),
+        "매칭률": score,
         "포함여부": status
     }
 
-def compare_documents_v2(rfp_text: str, proposal_text: str) -> List[Dict]:
-    sections = []
-    lines = rfp_text.splitlines()
-    current_title = ""
-    current_body = []
+# ----------------------------------------------------
+# 📋 전체 비교 실행
+# ----------------------------------------------------
+def compare_documents_v2(request_text: str, proposal_text: str) -> List[Dict]:
+    request_lines = [line.strip() for line in request_text.split("\n") if line.strip()]
+    proposal_text = normalize(proposal_text)
+    result = []
 
-    for line in lines:
-        line = line.strip()
-        if re.match(r'^([0-9]+\.|[Ⅰ-Ⅸ]+)[ \t\-]*', line):
-            if current_title and current_body:
-                sections.append((current_title, " ".join(current_body)))
-                current_body = []
-            current_title = line
-        elif current_title:
-            current_body.append(line)
+    for line in request_lines:
+        result.append(check_item(line, proposal_text))
 
-    if current_title and current_body:
-        sections.append((current_title, " ".join(current_body)))
+    return result
 
-    results = []
-    for section in sections:
-        result = check_item(section, proposal_text)
-        results.append(result)
+# ----------------------------------------------------
+# 📝 JSON 로그 저장
+# ----------------------------------------------------
+def save_log(results: List[Dict], filename: str = "compare_log.json"):
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    full_name = f"{filename.replace('.json', '')}_{now}.json"
+    with open(full_name, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
 
-    return results
-
-def save_log(results: List[Dict], log_path: str = "comparison_log.json"):
-    with open(log_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=4)
-
+# ----------------------------------------------------
+# 🧪 유닛 테스트 실행
+# ----------------------------------------------------
 def run_unit_test():
-    rfp = '''
-    1. 개요: 이 사업은 경주시의 스마트 교통체계 구축을 목적으로 한다.
-    2. 주요 기능: 실시간 교통량 수집 및 분석, 교통정보 제공 시스템 구축
-    3. 기대 효과: 교통 혼잡 완화 및 시민 만족도 제고
-    '''
-    proposal = '''
-    본 사업은 교통정보 제공 시스템을 중심으로 실시간 데이터 수집 및 분석 체계를 구현하며,
-    시민들의 교통편의성을 높이는 것을 목표로 한다.
-    '''
+    print("🧪 단위 테스트 시작")
+    rfp_text = """3.1 보안 기술 명시
+3.2 데이터 수집 방법
+3.3 유지보수 방안
+3.4 이행 일정
+3.5 성과 측정 기준"""
+    proposal_text = """
+    이 문서에는 보안 방안을 간략히 언급하였으며, 이행 일정과 성과 측정 지표가 포함되어 있습니다.
+    데이터 수집은 내부 표준을 따르며 유지보수 내용은 별첨 문서에 있습니다.
+    """
+    results = compare_documents_v2(rfp_text, proposal_text)
+    for r in results:
+        print(f"[{r['항목']}] → {r['포함여부']} | 매칭률: {r['매칭률'] * 100}%")
 
-    results = compare_documents_v2(rfp, proposal)
-    print(json.dumps(results, ensure_ascii=False, indent=2))
+    save_log(results)
+    print("✅ 단위 테스트 및 로그 저장 완료")
 
-# ✅ 추가 기능: TF-IDF 기반 유사 문단 매칭
-def get_best_matching_section(document_text: str, target_text: str) -> Tuple[str, float]:
-    sections = [s.strip() for s in document_text.split("\n\n") if len(s.strip()) > 30]
-
-    if not sections:
-        return "", 0.0
-
-    tfidf = TfidfVectorizer().fit_transform([target_text] + sections)
-    cosine_similarities = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
-
-    best_index = cosine_similarities.argmax()
-    return sections[best_index], float(cosine_similarities[best_index])
+# ----------------------------------------------------
+# ▶️ 직접 실행
+# ----------------------------------------------------
+if __name__ == "__main__":
+    run_unit_test()
