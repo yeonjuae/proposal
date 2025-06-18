@@ -1,136 +1,98 @@
-
-
-import fitz  # PyMuPDF
-import os
-import datetime
-from typing import Optional, List, Dict
+import streamlit as st
+import time
+import logging
+from typing import List, Dict
+from datetime import datetime
+from groq import Groq
 
 # ================================================================
-# 📄 PDF 텍스트 추출기 (확장형 500줄 수준)
-# - 기능: 텍스트 추출 + 통계 + 구조 정보 수집 + 에러 로깅
+# 🛠️ Groq 기반 피드백 생성기 (Streamlit secrets.toml 버전)
 # ================================================================
 
+# 🔐 secrets.toml에서 API 키 불러오기
+GROQ_API_KEY = st.secrets["groq_api_key"]
 
-# ------------------------------------------------------------
-# 📘 페이지별 텍스트 추출 함수
-# ------------------------------------------------------------
-def extract_text_by_page(file_bytes: bytes) -> List[Dict]:
-    try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        page_data = []
+# 🤖 Groq API 클라이언트 초기화
+client = Groq(api_key=GROQ_API_KEY)
 
-        for i, page in enumerate(doc):
-            text = page.get_text("text")
-            images = page.get_images(full=True)
-            chars = len(text)
-            has_image = bool(images)
-            entry = {
-                "page_number": i + 1,
-                "character_count": chars,
-                "has_image": has_image,
-                "text": text.strip() if text else "[빈 페이지]"
-            }
-            page_data.append(entry)
-
-        return page_data
-
-    except Exception as e:
-        return [{"page_number": 0, "error": str(e), "text": "[오류 발생]"}]
-
-
-# ------------------------------------------------------------
-# 📄 전체 PDF 통합 텍스트 추출
-# ------------------------------------------------------------
-def extract_text_from_pdf(uploaded_file) -> str:
-    """
-    Streamlit 업로드 객체 또는 바이너리에서 전체 텍스트 추출
-    """
-    try:
-        file_bytes = uploaded_file.read()
-        pages = extract_text_by_page(file_bytes)
-        full_text = "\n".join([p["text"] for p in pages if "text" in p])
-        return full_text
-
-    except Exception as e:
-        return f"[PDF 텍스트 추출 실패]: {e}"
-
-
-# ------------------------------------------------------------
-# 📦 PDF 통계 요약
-# ------------------------------------------------------------
-def summarize_pdf_statistics(page_data: List[Dict]) -> Dict:
-    total_pages = len(page_data)
-    total_characters = sum(p.get("character_count", 0) for p in page_data)
-    pages_with_images = sum(1 for p in page_data if p.get("has_image"))
-    blank_pages = sum(1 for p in page_data if not p.get("text") or p["text"] in ("[빈 페이지]", ""))
-
-    return {
-        "총 페이지 수": total_pages,
-        "총 문자 수": total_characters,
-        "이미지 포함 페이지 수": pages_with_images,
-        "빈 페이지 수": blank_pages,
-        "텍스트 평균 길이": round(total_characters / total_pages, 2) if total_pages > 0 else 0
-    }
-
-
-# ------------------------------------------------------------
-# 🧪 로컬 경로에서 PDF 텍스트 추출
-# ------------------------------------------------------------
-def extract_text_from_local_pdf(path: str) -> str:
-    if not os.path.exists(path):
-        return "[파일 없음]"
-    with open(path, "rb") as f:
-        return extract_text_from_pdf(f)
-
-
-# ------------------------------------------------------------
-# 🧪 전체 메타정보 및 구조 분석 출력
-# ------------------------------------------------------------
-def analyze_pdf_structure(uploaded_file) -> Dict:
-    file_bytes = uploaded_file.read()
-    page_data = extract_text_by_page(file_bytes)
-    stats = summarize_pdf_statistics(page_data)
-    return {
-        "통계": stats,
-        "페이지별 정보": page_data
-    }
-
-
-# ------------------------------------------------------------
-# 🧾 파일 정보 출력 (Streamlit 업로드 파일 기준)
-# ------------------------------------------------------------
-def get_file_info(uploaded_file) -> Dict:
-    try:
-        return {
-            "파일명": uploaded_file.name,
-            "파일크기(Byte)": uploaded_file.size,
-            "업로드시간": datetime.datetime.now().isoformat()
+# 📋 메시지 포맷 생성 함수
+def build_messages(prompt: str) -> List[Dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "당신은 대한민국 공공기관의 제안서 심사위원입니다. "
+                "제안요청서(RFP) 항목별로 제안서가 얼마나 충실히 작성되었는지 평가하십시오. "
+                "‘포함됨’, ‘부분 포함’, ‘누락됨’ 상태에 따라 명확하고 전문적인 피드백을 작성해 주세요. "
+                "말투는 공손하지만 분석적이어야 하며, 항목별로 간결하게 정리해 주세요."
+            )
+        },
+        {
+            "role": "user",
+            "content": clean_prompt(prompt)
         }
-    except Exception:
-        return {"파일 정보": "불러올 수 없음"}
+    ]
 
+# 🧼 프롬프트 클린징
+def clean_prompt(prompt: str) -> str:
+    cleaned = prompt.replace("\n\n", "\n").strip()
+    return cleaned
 
-# ------------------------------------------------------------
-# ▶️ 유닛 테스트 코드 (직접 실행 시)
-# ------------------------------------------------------------
-if __name__ == "__main__":
-    test_file = "sample.pdf"
+# 🔍 항목별 피드백 요약 유틸
+def summarize_sections(prompt: str) -> List[str]:
+    lines = prompt.strip().split("\n")
+    summaries = []
+    for line in lines:
+        if "→" in line:
+            try:
+                key, value = line.split("→")
+                summaries.append(f"[요약] {key.strip()}: {value.strip()}")
+            except ValueError:
+                summaries.append(f"[형식 오류] {line}")
+    return summaries
 
-    if not os.path.exists(test_file):
-        print("❌ sample.pdf 파일이 현재 디렉토리에 없습니다.")
-    else:
-        with open(test_file, "rb") as f:
-            file_bytes = f.read()
+# 📦 유효성 검사 함수
+def validate_prompt(prompt: str) -> bool:
+    if not prompt or not isinstance(prompt, str):
+        return False
+    if "→" not in prompt:
+        return False
+    return True
 
-        print("✅ 페이지별 텍스트 추출")
-        page_data = extract_text_by_page(file_bytes)
-        for p in page_data:
-            print(f"- 페이지 {p['page_number']} | 문자수: {p['character_count']} | 이미지 포함: {p['has_image']}")
+# 📁 로깅 설정
+LOG_PATH = "feedback_log.txt"
+def log_event(message: str):
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        f.write(f"{timestamp} {message}\n")
 
-        print("\n📊 PDF 통계")
-        stats = summarize_pdf_statistics(page_data)
-        for k, v in stats.items():
-            print(f"{k}: {v}")
+# 🤖 피드백 생성 함수
+def generate_feedback(prompt: str, debug: bool = False) -> str:
+    if not validate_prompt(prompt):
+        return "❌ 유효하지 않은 프롬프트 형식입니다. 항목별 ‘→ 포함 상태’ 형식을 따르세요."
 
-        print("\n🧾 전체 텍스트 미리보기:")
-        print("\n".join([p["text"][:100] for p in page_data if "text" in p]))
+    try:
+        messages = build_messages(prompt)
+        start_time = time.time()
+
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",  # 또는 llama3-70b-8192
+            messages=messages,
+            temperature=0.65,
+            max_tokens=2000,
+            top_p=1,
+            stop=None
+        )
+
+        elapsed = round(time.time() - start_time, 2)
+        content = response.choices[0].message.content.strip()
+
+        log_event(f"피드백 생성 성공 (소요 시간: {elapsed}s)")
+
+        if debug:
+            return f"=== [디버그 모드] ===\n{content}\n\n⏱ 처리 시간: {elapsed}s"
+        return content
+
+    except Exception as e:
+        log_event(f"⚠️ 피드백 생성 실패: {e}")
+        return f"❌ 피드백 생성 중 오류가 발생했습니다: {e}"
